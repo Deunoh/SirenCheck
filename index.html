@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SirenCheck</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="page">
+    <header class="hero">
+      <div class="wordmark">
+        <span class="wordmark-siren">SIREN</span><span class="wordmark-check">CHECK</span>
+      </div>
+      <p class="subtitle">// recherche officielle SIREN &middot; SIRET</p>
+    </header>
+
+    <form id="search-form" class="search-bar" autocomplete="off">
+      <span class="search-hash">N&deg;</span>
+      <input
+        id="query-input"
+        type="text"
+        inputmode="numeric"
+        placeholder="552 100 554"
+        aria-label="SIREN ou SIRET"
+      />
+      <button type="submit" id="search-btn">Rechercher &rarr;</button>
+    </form>
+
+    <p id="error-message" class="error" hidden></p>
+
+    <section id="result" class="result" hidden></section>
+  </main>
+
+  <script src="script.js"></script>
+</body>
+</html>
