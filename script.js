@@ -5,6 +5,11 @@ const input = document.getElementById("query-input");
 const button = document.getElementById("search-btn");
 const errorEl = document.getElementById("error-message");
 const resultEl = document.getElementById("result");
+const historyEl = document.getElementById("history");
+const historyListEl = document.getElementById("history-list");
+
+const HISTORY_KEY = "sirencheck:history";
+const HISTORY_MAX = 6;
 
 const EFFECTIF_LABELS = {
   NN: "Effectif non renseigné",
@@ -46,10 +51,23 @@ form.addEventListener("submit", (event) => {
   runSearch();
 });
 
+input.addEventListener("input", () => {
+  if (input.value.trim() === "") {
+    hideError();
+    hideResult();
+    renderHistory();
+  } else {
+    hideHistory();
+  }
+});
+
+renderHistory();
+
 function runSearch() {
   const raw = input.value.replace(/\s|\./g, "");
   hideError();
   hideResult();
+  hideHistory();
 
   if (!/^\d{9}(\d{5})?$/.test(raw)) {
     showError("Merci de saisir un SIREN (9 chiffres) ou un SIRET (14 chiffres) valide.");
@@ -72,12 +90,76 @@ function runSearch() {
         return;
       }
       renderCompany(company, raw);
+      addToHistory(raw, company);
     })
     .catch(() => {
       showError("Impossible de contacter l'API. Réessayez dans un instant.");
     })
     .finally(() => setLoading(false));
 }
+
+function loadHistory() {
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY);
+    const list = raw ? JSON.parse(raw) : [];
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveHistory(list) {
+  try {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(list));
+  } catch {
+    // localStorage indisponible (navigation privée, quota) : on ignore silencieusement
+  }
+}
+
+function addToHistory(query, company) {
+  const list = loadHistory().filter((entry) => entry.query !== query);
+  list.unshift({ query, name: company.nom_complet || null, company });
+  saveHistory(list.slice(0, HISTORY_MAX));
+}
+
+function renderHistory() {
+  const list = loadHistory();
+  if (list.length === 0) {
+    hideHistory();
+    return;
+  }
+
+  historyListEl.innerHTML = list
+    .map((entry, i) => {
+      const numberLabel = entry.query.length === 14 ? formatSiret(entry.query) : formatSiren(entry.query);
+      return `
+        <button type="button" class="history-item" data-index="${i}">
+          <span class="history-name">${escapeHtml(entry.name || "Nom inconnu")}</span>
+          <span class="history-num">${numberLabel}</span>
+        </button>
+      `;
+    })
+    .join("");
+
+  historyEl.hidden = false;
+}
+
+function hideHistory() {
+  historyEl.hidden = true;
+}
+
+historyListEl.addEventListener("click", (event) => {
+  const btn = event.target.closest(".history-item");
+  if (!btn) return;
+  const list = loadHistory();
+  const entry = list[Number(btn.dataset.index)];
+  if (!entry) return;
+
+  input.value = entry.query;
+  hideError();
+  hideHistory();
+  renderCompany(entry.company, entry.query);
+});
 
 function setLoading(isLoading) {
   button.disabled = isLoading;
