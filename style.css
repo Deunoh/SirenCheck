@@ -380,6 +380,18 @@ body {
   font-weight: 700;
 }
 
+.ape-link {
+  color: var(--ink);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1.5px;
+}
+
+.ape-link:hover {
+  background: var(--yellow);
+  text-decoration-style: solid;
+}
+
 @media (max-width: 560px) {
   .wordmark { font-size: 2.1rem; }
   #search-btn { padding: 0 18px; }

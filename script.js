@@ -11,6 +11,9 @@ const historyListEl = document.getElementById("history-list");
 const HISTORY_KEY = "sirencheck:history";
 const HISTORY_MAX = 6;
 
+// Nomenclature INSEE complète des tranches d'effectif salarié (variable
+// "tranche_effectif_salarie" de la base SIRENE) — l'API ne renvoie que le code, jamais
+// le libellé. Liste exhaustive et stable : https://www.insee.fr/fr/metadonnees/definition/c1841
 const EFFECTIF_LABELS = {
   NN: "Effectif non renseigné",
   "00": "0 salarié",
@@ -28,22 +31,6 @@ const EFFECTIF_LABELS = {
   51: "2 000 à 4 999 salariés",
   52: "5 000 à 9 999 salariés",
   53: "10 000 salariés et plus",
-};
-
-const FORME_JURIDIQUE_LABELS = {
-  1000: "Entrepreneur individuel",
-  5202: "SNC",
-  5410: "SARL",
-  5498: "SARL",
-  5499: "SARL",
-  5505: "SA à conseil d'administration",
-  5599: "SA",
-  5710: "SAS",
-  5720: "SASU",
-  5800: "SE (société européenne)",
-  6100: "Caisse d'épargne",
-  6540: "Société coopérative",
-  9220: "Association déclarée",
 };
 
 form.addEventListener("submit", (event) => {
@@ -195,7 +182,7 @@ function renderCompany(company, queried) {
     : "Adresse non disponible";
 
   const effectifLabel = EFFECTIF_LABELS[company.tranche_effectif_salarie] || "Non renseigné";
-  const formeLabel = FORME_JURIDIQUE_LABELS[company.nature_juridique] || `Code ${company.nature_juridique || "n/c"}`;
+  const formeLabel = getLegalFormLabel(company.nature_juridique) || "Forme juridique non renseignée";
   const dateCreation = formatDate(company.date_creation);
 
   resultEl.innerHTML = `
@@ -233,7 +220,7 @@ function renderCompany(company, queried) {
       </div>
       <div class="info-item">
         <span class="label">Activité principale (APE)</span>
-        <span class="value">${escapeHtml(company.activite_principale || "n/c")}</span>
+        <span class="value">${renderApeCode(company.activite_principale)}</span>
       </div>
       <div class="info-item">
         <span class="label">Nombre d'établissements</span>
@@ -247,6 +234,12 @@ function renderCompany(company, queried) {
   `;
 
   resultEl.hidden = false;
+}
+
+function renderApeCode(code) {
+  if (!code) return "n/c";
+  const url = `https://www.insee.fr/fr/metadonnees/nafr2/sousClasse/${encodeURIComponent(code)}`;
+  return `<a class="ape-link" href="${url}" target="_blank" rel="noopener noreferrer" title="Voir le libellé officiel de ce code APE sur insee.fr">${escapeHtml(code)}</a>`;
 }
 
 function formatSiren(siren) {
