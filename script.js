@@ -52,9 +52,13 @@ renderHistory();
 
 function runSearch() {
   const raw = input.value.replace(/\s|\./g, "");
+  hideHistory();
+  performSearch(raw);
+}
+
+function performSearch(raw) {
   hideError();
   hideResult();
-  hideHistory();
 
   if (!/^\d{9}(\d{5})?$/.test(raw)) {
     showError("Merci de saisir un SIREN (9 chiffres) ou un SIRET (14 chiffres) valide.");
@@ -78,12 +82,117 @@ function runSearch() {
       }
       renderCompany(company, raw);
       addToHistory(raw, company);
+      loadEtablissements(company);
     })
     .catch(() => {
       showError("Impossible de contacter l'API. Réessayez dans un instant.");
     })
     .finally(() => setLoading(false));
 }
+
+// L'API ne renvoie la liste des établissements (matching_etablissements) que pour une
+// recherche en texte libre, jamais pour une recherche directe par SIREN/SIRET. On
+// refait donc une recherche par nom pour la récupérer, puis on ne garde que le résultat
+// dont le SIREN correspond exactement — ça évite d'afficher les établissements d'une
+// autre entreprise en cas d'homonymie.
+let etablissementsRequestToken = 0;
+
+function loadEtablissements(company) {
+  const container = document.getElementById("etablissements-block");
+  if (!container) return;
+  container.hidden = true;
+
+  // nom_raison_sociale (le nom légal brut) donne une recherche bien plus fiable que
+  // nom_complet, qui inclut parfois les enseignes/sigles entre parenthèses (ex. "ISAGRI
+  // (ISAGRI, AGIRIS, TERRE-NET, ...)") : l'API traite alors la requête comme trop
+  // spécifique et ne retrouve plus qu'un seul établissement au lieu de tous.
+  const searchName = company.nom_raison_sociale || company.nom_complet;
+
+  if (!searchName || !company.siren || !company.nombre_etablissements || company.nombre_etablissements <= 1) {
+    return;
+  }
+
+  const requestId = ++etablissementsRequestToken;
+  const url = `${API_BASE}?q=${encodeURIComponent(searchName)}&per_page=25&limite_matching_etablissements=100`;
+
+  fetch(url)
+    .then((res) => (res.ok ? res.json() : null))
+    .then((data) => {
+      if (!data || requestId !== etablissementsRequestToken) return;
+      const match = (data.results || []).find((r) => r.siren === company.siren);
+      const list = match && Array.isArray(match.matching_etablissements) ? match.matching_etablissements : [];
+      if (list.length === 0) return;
+      renderEtablissements(container, list, company.nombre_etablissements);
+    })
+    .catch(() => {
+      // Échec silencieux : cette liste est un complément, pas l'info principale.
+    });
+}
+
+function renderEtablissements(container, list, totalCount) {
+  const siege = list.find((etab) => etab.est_siege);
+  // Le siège reste toujours visible, comme tout établissement ; seuls les autres sont
+  // repliés par défaut pour rester lisible même quand il y en a beaucoup (une grosse
+  // entreprise peut en avoir plusieurs dizaines).
+  const others = list
+    .filter((etab) => !etab.est_siege)
+    .sort((a, b) => {
+      const aOpen = a.etat_administratif === "A";
+      const bOpen = b.etat_administratif === "A";
+      return aOpen === bOpen ? 0 : aOpen ? -1 : 1;
+    });
+
+  if (!siege && others.length === 0) {
+    container.hidden = true;
+    return;
+  }
+
+  const truncated = totalCount && totalCount > list.length;
+  const count = others.length;
+
+  container.innerHTML = `
+    ${siege ? `
+    <div class="etablissements-list siege-row">
+      ${renderEtabItem(siege, true)}
+    </div>` : ""}
+    ${others.length > 0 ? `
+    <details class="etablissements-details">
+      <summary class="etablissements-summary">
+        Voir ${count} autre${count > 1 ? "s" : ""} établissement${count > 1 ? "s" : ""}${truncated ? ` (liste limitée à 100)` : ""}
+      </summary>
+      <div class="etablissements-list">
+        ${others.map((etab) => renderEtabItem(etab, false)).join("")}
+      </div>
+    </details>` : ""}
+  `;
+
+  container.hidden = false;
+}
+
+function renderEtabItem(etab, isSiege) {
+  const isOpen = etab.etat_administratif === "A";
+  const adresse = etab.adresse
+    || [etab.code_postal, etab.libelle_commune].filter(Boolean).join(" ")
+    || "Adresse non disponible";
+  return `
+    <button type="button" class="etab-item" data-siret="${escapeHtml(etab.siret || "")}">
+      <span class="etab-main">
+        <span class="etab-siret">${formatSiret(etab.siret)}</span>
+        ${isSiege ? '<span class="etab-tag siege">Siège</span>' : ""}
+        <span class="etab-tag ${isOpen ? "open" : "closed"}">${isOpen ? "Actif" : "Fermé"}</span>
+      </span>
+      <span class="etab-address">${escapeHtml(adresse)}</span>
+    </button>
+  `;
+}
+
+resultEl.addEventListener("click", (event) => {
+  const btn = event.target.closest(".etab-item");
+  if (!btn || !btn.dataset.siret) return;
+  input.value = btn.dataset.siret;
+  hideHistory();
+  performSearch(btn.dataset.siret);
+});
 
 function loadHistory() {
   try {
@@ -146,6 +255,7 @@ historyListEl.addEventListener("click", (event) => {
   hideError();
   hideHistory();
   renderCompany(entry.company, entry.query);
+  loadEtablissements(entry.company);
 });
 
 function setLoading(isLoading) {
@@ -169,11 +279,18 @@ function hideResult() {
 
 function renderCompany(company, queried) {
   const isSiret = queried.length === 14;
-  const etablissement = isSiret && company.matching_etablissements && company.matching_etablissements[0]
+  // Quand on cherche un SIRET précis, son propre statut (ouvert/fermé) peut différer de
+  // celui de l'entreprise dans son ensemble (une entreprise active peut très bien avoir
+  // fermé tel ou tel établissement) : on affiche donc le statut de l'établissement visé
+  // plutôt que celui de l'entreprise dans ce cas.
+  const matchedEtablissement = isSiret && company.matching_etablissements && company.matching_etablissements[0]
     ? company.matching_etablissements[0]
-    : company.siege;
+    : null;
+  const etablissement = matchedEtablissement || company.siege;
 
-  const isActive = company.etat_administratif === "A";
+  const isActive = matchedEtablissement
+    ? matchedEtablissement.etat_administratif === "A"
+    : company.etat_administratif === "A";
   const tvaNumbers = company.tva;
   const hasTva = Array.isArray(tvaNumbers) && tvaNumbers.length > 0;
 
@@ -191,7 +308,9 @@ function renderCompany(company, queried) {
       <p class="result-sub">SIREN ${formatSiren(company.siren)}${isSiret ? ` · SIRET ${formatSiret(queried)}` : ""}</p>
       <div class="badges">
         <span class="badge ${isActive ? "green" : "red"}">
-          ${isActive ? "Active" : "Cessée"}
+          ${matchedEtablissement
+            ? (isActive ? "Établissement actif" : "Établissement fermé")
+            : (isActive ? "Active" : "Cessée")}
         </span>
         <span class="badge amber">${escapeHtml(formeLabel)}</span>
       </div>
@@ -212,7 +331,7 @@ function renderCompany(company, queried) {
     <div class="info-grid">
       <div class="info-item">
         <span class="label">Date de création</span>
-        <span class="value">${dateCreation}</span>
+        <span class="value">${escapeHtml(dateCreation)}</span>
       </div>
       <div class="info-item">
         <span class="label">Effectif</span>
@@ -231,6 +350,8 @@ function renderCompany(company, queried) {
         <span class="value">${escapeHtml(adresse)}</span>
       </div>
     </div>
+
+    <div id="etablissements-block" class="etablissements" hidden></div>
   `;
 
   resultEl.hidden = false;
